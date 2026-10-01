@@ -9,7 +9,8 @@ pool: asyncpg.Pool | None = None
 async def init_db() -> None:
     global pool
     dsn = settings.DATABASE_URL.replace("+asyncpg", "")
-    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
+    ssl = "require" if "localhost" not in dsn and "127.0.0.1" not in dsn else None
+    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10, ssl=ssl)
 
     schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
     with open(schema_path) as f:

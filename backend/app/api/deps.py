@@ -19,8 +19,8 @@ def get_document_service() -> DocumentService:
 
 
 def get_search_service() -> SearchService:
-    return SearchService(get_document_repo())
+    return SearchService(get_document_repo(), get_chunk_repo())
 
 
 def get_chat_service() -> ChatService:
-    return ChatService(get_document_repo())
+    return ChatService(get_document_repo(), get_chunk_repo())

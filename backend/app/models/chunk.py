@@ -9,6 +9,6 @@ class Chunk:
     document_id: UUID
     content: str
     chunk_index: int
-    vector_id: str
     token_count: int
+    embedding: list[float] | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

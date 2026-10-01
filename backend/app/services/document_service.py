@@ -49,14 +49,5 @@ class DocumentService:
         return {"documents": docs, "total": total, "offset": offset, "limit": limit}
 
     async def delete_document(self, doc_id: UUID) -> bool:
-        from app.vector_store.chroma_store import delete_vectors
-
-        chunks = await self.chunk_repo.get_by_document(doc_id)
-        if chunks:
-            vector_ids = [c["vector_id"] for c in chunks]
-            delete_vectors(vector_ids)
-
-        await self.chunk_repo.delete_by_document(doc_id)
-        deleted = await self.doc_repo.delete(doc_id)
-
-        return deleted
+        # Chunks are removed automatically via ON DELETE CASCADE
+        return await self.doc_repo.delete(doc_id)

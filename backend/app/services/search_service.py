@@ -1,13 +1,14 @@
 from uuid import UUID
 
 from app.embeddings.sentence_transformer import embed_query
-from app.vector_store.chroma_store import query_vectors
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.chunk_repository import ChunkRepository
 
 
 class SearchService:
-    def __init__(self, doc_repo: DocumentRepository):
+    def __init__(self, doc_repo: DocumentRepository, chunk_repo: ChunkRepository):
         self.doc_repo = doc_repo
+        self.chunk_repo = chunk_repo
 
     async def semantic_search(
         self,
@@ -17,31 +18,23 @@ class SearchService:
     ) -> list[dict]:
         query_embedding = embed_query(query)
 
-        filter_dict = None
-        if document_ids:
-            filter_dict = {
-                "document_id": {"$in": [str(did) for did in document_ids]}
-            }
-
-        matches = query_vectors(query_embedding, top_k=top_k, filter_dict=filter_dict)
+        chunks = await self.chunk_repo.search(
+            query_embedding, top_k=top_k, document_ids=document_ids
+        )
 
         results = []
-        for match in matches:
-            meta = match.get("metadata", {})
-            doc_id = meta.get("document_id")
-            filename = None
-            if doc_id:
-                doc = await self.doc_repo.get_by_id(UUID(doc_id))
-                if doc:
-                    filename = doc["filename"]
+        for chunk in chunks:
+            doc_id = chunk["document_id"]
+            doc = await self.doc_repo.get_by_id(doc_id)
+            filename = doc["filename"] if doc else None
 
             results.append({
-                "chunk_id": meta.get("chunk_id"),
+                "chunk_id": chunk["id"],
                 "document_id": doc_id,
-                "content": meta.get("content", ""),
-                "score": match.get("score", 0.0),
+                "content": chunk["content"],
+                "score": float(chunk["score"]),
                 "filename": filename,
-                "chunk_index": meta.get("chunk_index", 0),
+                "chunk_index": chunk["chunk_index"],
             })
 
         return results

@@ -8,7 +8,6 @@ from app.core.config import settings
 from app.processors.extractor import extract_content
 from app.processors.chunker import chunk_text
 from app.embeddings.sentence_transformer import embed_texts
-from app.vector_store.chroma_store import upsert_vectors, generate_id
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,8 @@ async def _process_document_async(document_id: str, file_path: str):
     import asyncpg
 
     dsn = settings.DATABASE_URL.replace("+asyncpg", "")
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    ssl = "require" if "localhost" not in dsn and "127.0.0.1" not in dsn else None
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2, ssl=ssl)
 
     try:
         await pool.execute(
@@ -31,7 +31,7 @@ async def _process_document_async(document_id: str, file_path: str):
         )
 
         content_type = _guess_content_type(file_path)
-        text = extract_content(Path(file_path), content_type)
+        text = await extract_content(Path(file_path), content_type)
 
         if not text.strip():
             await pool.execute(
@@ -46,39 +46,30 @@ async def _process_document_async(document_id: str, file_path: str):
         chunk_contents = [c.content for c in chunks]
         embeddings = embed_texts(chunk_contents)
 
-        chroma_vectors = []
-        chunk_records = []
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            vector_id = generate_id()
-            chroma_vectors.append({
-                "id": vector_id,
-                "values": embedding,
-                "metadata": {
-                    "document_id": document_id,
-                    "chunk_index": chunk.chunk_index,
-                    "content": chunk.content[:1000],
-                },
-            })
-            chunk_records.append({
+        chunk_records = [
+            {
                 "document_id": document_id,
                 "content": chunk.content,
                 "chunk_index": chunk.chunk_index,
-                "vector_id": vector_id,
                 "token_count": chunk.token_count,
-            })
-
-        upsert_vectors(chroma_vectors)
+                "embedding": embedding,
+            }
+            for chunk, embedding in zip(chunks, embeddings)
+        ]
 
         if chunk_records:
             contents = [c["content"] for c in chunk_records]
             indices = [c["chunk_index"] for c in chunk_records]
-            vector_ids = [c["vector_id"] for c in chunk_records]
             token_counts = [c["token_count"] for c in chunk_records]
+            vector_literals = [
+                "[" + ",".join(str(v) for v in c["embedding"]) + "]"
+                for c in chunk_records
+            ]
             await pool.fetch(
-                """INSERT INTO chunks (document_id, content, chunk_index, vector_id, token_count)
+                """INSERT INTO chunks (document_id, content, chunk_index, token_count, embedding)
                    SELECT $1::uuid, unnest($2::text[]), unnest($3::int[]),
-                          unnest($4::text[]), unnest($5::int[])""",
-                UUID(document_id), contents, indices, vector_ids, token_counts,
+                          unnest($4::int[]), (unnest($5::text[]))::vector""",
+                UUID(document_id), contents, indices, token_counts, vector_literals,
             )
 
         await pool.execute(
